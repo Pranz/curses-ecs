@@ -2,10 +2,11 @@ module Position where
 
 import Control.Monad.Trans.State
 import Control.Monad.Trans.Class (lift)
-import Control.Monad (when, unless)
+import Control.Monad (when, unless, guard, forM)
+import Control.Applicative
 
 import Data.Maybe (mapMaybe)
-import qualified Data.Foldable (all)
+import qualified Data.Foldable as F (all, forM_)
 import Data.Ecs
 import UI.NCurses
 
@@ -16,18 +17,23 @@ moveEntity :: Instance -> Int -> Int -> Game ()
 moveEntity inst xx yy = do
     (Pos x y) <- getComponentData Position inst
     let newPos@(Pos newX newY) = Pos (x + xx) (y + yy)
-    positionables <- fmap (map fst . filter ((\(Pos x' y') -> newX == x' && newY == y') . snd)) $ getComponentDataList Position 
+    entitiesAtSamePosition <- getComponentDataList Position <$$> \ls -> do
+        (ent, Pos x' y') <- ls
+        guard (x' == newX && y' == newY)
+        return ent
     (interactables, collisionables) <- do
-      inters <- fmap (mapMaybe (\(i,md) -> fmap (i,) md)) . sequence 
-        $ fmap (\i -> fmap (i,) $ mgetComponentData Interactable i) positionables
-      collis <- fmap (mapMaybe (\(i,md) -> fmap (i,) md)) . sequence 
-        $ fmap (\i -> fmap (i,) $ mgetComponentData Collision i)    positionables
-      return (inters, collis)
-    mapM_ (\(self, Interacts f) -> f self inst) interactables
-    collides <- mapM (\(self, Collides col) -> col self) collisionables
-    w <- getWindow
-    unless (foldr (||) False collides) $ do
-      lift . updateWindow w $ do
-        moveCursor (fromIntegral y) (fromIntegral x)
-        drawString " "
-      modifyComponentOf Position inst (const newPos)
+        inters <- fmap (mapMaybe (\(i,md) -> fmap (i,) md)) . sequence 
+            $ fmap (\i -> fmap (i,) $ mgetComponentData Interactable i) entitiesAtSamePosition
+        collis <- fmap (mapMaybe (\(i,md) -> fmap (i,) md)) . sequence 
+            $ fmap (\i -> fmap (i,) $ mgetComponentData Collision i)    entitiesAtSamePosition
+        return (inters, collis)
+    F.forM_ interactables
+        (\(self, Interacts f) -> f self inst)
+    collides <- forM collisionables
+        (\(self, Collides col) -> col self)
+    unless (any id collides) $ do
+        w <- getWindow
+        lift . updateWindow w $ do
+            moveCursor (fromIntegral y) (fromIntegral x)
+            drawString " "
+        modifyComponentOf Position inst (const newPos)

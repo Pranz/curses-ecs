@@ -2,7 +2,11 @@ import UI.NCurses
 import Data.Ecs
 import Data.Map
 import Data.Foldable (forM_)
+import Data.Array.IO
 import Data.Char
+import Data.Word
+import Data.Function (on)
+import Control.Applicative ((<$>))
 import Control.Monad.Trans.State
 import Control.Monad.Trans.Class
 import Control.Monad (void)
@@ -14,17 +18,20 @@ import System.Exit
 import Types
 import Render
 import Event
+import Util
 
 main :: IO ()
 main = do
     putStrLn "Starting Game"
     mvar <- newEmptyMVar
+    collisionMap <- newArray ((fromIntegral 0, fromIntegral 0),(fromIntegral 128,fromIntegral 128)) False :: IO (IOUArray (Word8,Word8) Bool)
     runCurses $ do
       setEcho False
       setCursorMode CursorInvisible
-      w <- defaultWindow
-      void $ flip execStateT (initWorld (AdditionalState w)) (initGame >> gameLoop)
+      w <- newWindow 0 0 0 0
+      void $ flip execStateT (initWorld (AdditionalState w collisionMap)) (initGame >> gameLoop)
     return ()
+
 initGame :: Game ()
 initGame = do
     mkEntity [(Player, IsPlayer), (Printable, Graph '@'), (Position, Pos 5 5)]
@@ -34,6 +41,9 @@ initGame = do
              ,(Printable, Graph 'k')
              ,(Collision, Collides (const $ return True))
              ]
+    wallMap <- wall . additionalState <$> get
+    forM_ [0..20] $ \i ->
+        putWall i 10
     return ()
 
 gameLoop :: Game ()
